@@ -15,7 +15,7 @@
 
 **Problem:** Group photo sharing today is a mess. Albums fill up with blurry duplicates, no one curates, and "best of" recaps require manual work. Finding "all the photos of Mom from the trip" means scrolling for an hour. Public photo communities are also overrun with bot accounts and spam.
 
-**Solution:** A cross-platform mobile app where any group can spin up a shared album, drop in photos, and instantly get a quality-ranked gallery, per-person face tagging, and auto-generated themed montages. Public albums are protected from bots via World ID proof of personhood. Face recognition is strictly opt-in and album-scoped — no cross-album face graph.
+**Solution:** A native iOS app where any group can spin up a shared album, drop in photos, and instantly get a quality-ranked gallery, per-person face tagging, and auto-generated themed montages. Public albums are protected from bots via World ID proof of personhood. Face recognition is strictly opt-in and album-scoped — no cross-album face graph.
 
 ---
 
@@ -28,11 +28,12 @@
 - **Person-tagged photos** — opt-in face recognition lets users see "all photos of [person]" within an album.
 - Themed montages by person, tag, location, or face count.
 - Bot-resistant explore page — every account on public surfaces is a verified unique human.
-- One codebase shipping to both iOS and Android by demo time.
+- Native iOS app shipping to TestFlight by demo time.
 
 ### 2.2 Non-Goals
 
-- Web app or PWA. Mobile-only.
+- Web app or PWA. iOS-only for now.
+- Android version. iOS-only for the hackathon.
 - **Cross-album face recognition.** A person enrolled in one album is not auto-recognized in another.
 - Face recognition on non-consenting people. Identification only happens for users who self-enroll, or for clusters that an album member has explicitly named.
 - Long-term storage guarantees, paid tiers, or enterprise features.
@@ -55,21 +56,21 @@ Three primary personas, all on mobile during or right after a shared experience.
 
 | Layer | Choice |
 |---|---|
-| **Mobile app** | React Native via Expo (SDK 52+) with TypeScript. Single codebase ships to iOS and Android. EAS Build for binaries. |
-| **Navigation** | Expo Router (file-based routing). Bottom tab nav for Home / Explore / Profile, stack nav inside each tab. |
-| **State / data** | TanStack Query for server state, Zustand for local UI state, MMKV for persistent client storage (session, draft uploads). |
-| **Camera & library** | `expo-image-picker` for multi-select from library, `expo-camera` for in-app capture, `expo-media-library` for HEIC/EXIF metadata. |
+| **Mobile app** | Native iOS with Swift 5.10+ and SwiftUI. Targets iOS 17+. Distributed via TestFlight. |
+| **Navigation** | SwiftUI `NavigationStack` + `TabView` for Home / Explore / Profile, with `NavigationPath` for programmatic routing and deep links. |
+| **State / data** | SwiftUI `@Observable` / `@State` for UI state, structured concurrency (`async/await`) for network calls, SwiftData for local persistence (session, draft uploads). |
+| **Camera & library** | `PhotosUI` (`PHPickerViewController`) for multi-select from library, `AVFoundation` for in-app camera capture, `Photos` framework for HEIC/EXIF metadata. |
 | **Backend** | Javascript + Express. Postgres via Supabase. Webhook handlers for Cloudinary and Rekognition callbacks. |
-| **Auth** | World ID 4.0. Mobile flow uses universal/app links to hand off to the World App, which returns the proof to our app. Server verifies via `developer.world.org/api/v4/verify/{rp_id}`. Session = JWT in MMKV. |
+| **Auth** | World ID 4.0. Mobile flow uses universal links to hand off to the World App, which returns the proof to our app. Server verifies via `developer.world.org/api/v4/verify/{rp_id}`. Session = JWT stored in Keychain. |
 | **Media storage & quality AI** | Cloudinary — direct uploads from the device using the unsigned upload preset, with Quality Analysis, Google Auto-Tagging, and Face Detection enabled. Cloudinary URLs for delivery and transformations. |
 | **Face recognition** | **AWS Rekognition.** One face collection per album. `IndexFaces` on enrollment, `SearchFacesByImage` on each new upload. Faces tagged via cluster-and-name flow. |
-| **Image delivery** | `expo-image` for cached, transformed Cloudinary URLs (`w_*,q_auto,f_auto,dpr_auto`). |
-| **Montages** | Cloudinary multi-image transformations for static collages; Cloudinary video API for slideshow reels. Played in-app with `expo-video`. |
-| **Push (optional)** | `expo-notifications` for "new photos in your album" and "your montage is ready". |
+| **Image delivery** | `AsyncImage` with custom `URLSession` caching or Kingfisher/Nuke for cached, transformed Cloudinary URLs (`w_*,q_auto,f_auto,dpr_auto`). |
+| **Montages** | Cloudinary multi-image transformations for static collages; Cloudinary video API for slideshow reels. Played in-app with `AVPlayer` / SwiftUI `VideoPlayer`. |
+| **Push (optional)** | APNs via `UserNotifications` framework for "new photos in your album" and "your montage is ready". |
 
-### 4.1 Why React Native (Expo)
+### 4.1 Why Native Swift / SwiftUI
 
-A cross-functional mobile app needs first-class access to the camera, photo library, and EXIF metadata — all limited or awkward in a browser. Expo gives us a single TypeScript codebase that ships to both iOS and Android, with managed config for camera permissions, deep linking (needed for the World ID handoff), and over-the-air updates during the hackathon. EAS Build means we can hand a TestFlight or APK to judges instead of asking them to scan a QR code.
+A photo-centric app needs first-class access to the camera, photo library, EXIF metadata, and background upload tasks — all of which are best served by native iOS APIs. SwiftUI gives us a modern declarative UI with tight platform integration: `PHPickerViewController` for multi-select, `AVFoundation` for camera capture, `BGTaskScheduler` for background uploads, and built-in universal link handling for the World ID handoff. Building natively avoids React Native bridging overhead for image-heavy workloads and eliminates the risk of needing a custom native module mid-hackathon. We distribute via TestFlight so judges can install directly.
 
 ### 4.2 Why World ID
 
@@ -99,7 +100,7 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 4. World App returns to our app via deep link with the proof payload.
 5. App posts the proof to `POST /auth/verify` on our backend.
 6. Backend verifies via `developer.world.org/api/v4/verify/{rp_id}` and creates a user row keyed on the nullifier hash.
-7. Backend returns a JWT; app stores it in MMKV.
+7. Backend returns a JWT; app stores it in Keychain.
 8. User picks a display handle (3–20 chars, unique). This is shown publicly on explore.
 
 **Acceptance criteria:**
@@ -108,7 +109,7 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 - Same World ID can never create two accounts (nullifier collision returns existing account).
 - No PII (name, email, phone) is collected or stored anywhere.
 - Handle is editable from settings, but uniqueness is enforced.
-- Fallback when World App is not installed: deep link surfaces an install prompt with App Store / Play Store links.
+- Fallback when World App is not installed: deep link surfaces an install prompt with App Store link.
 
 ### 5.2 Shared Photo Album (Private / Public)
 
@@ -118,7 +119,7 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 
 1. User taps `+` on Home tab → "New album", enters a name and optional description.
 2. User picks visibility: Private (link-only) or Public (appears on explore).
-3. Album created with a 6-character join code, a deep link `Bloom://a/ABC123`, and a universal link `https://Bloom.app/a/ABC123` for sharing.
+3. Album created with a 6-character join code, a custom URL `Bloom://a/ABC123`, and a universal link `https://Bloom.app/a/ABC123` (backed by Apple App Site Association) for sharing.
 4. Backend creates a per-album Rekognition face collection (`Bloom_album_{album_id}`) at the same time. This collection is deleted if the album is deleted.
 5. Owner shares the link via the native share sheet.
 6. Recipient taps the link → app opens to a "Join album?" screen → confirms → becomes a contributor.
@@ -130,7 +131,7 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 - Private albums are accessible only via the join link; not enumerable in any API.
 - Public albums require contributors to be World-ID-verified before uploading.
 - Each album shows photo count, contributor count, and "people tagged" count on the home screen.
-- Join links work via universal links on both iOS and Android.
+- Join links work via universal links on iOS.
 
 ### 5.3 Photo Upload
 
@@ -139,7 +140,7 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 **User flow:**
 
 1. Inside an album, user taps the camera FAB.
-2. Action sheet: "Take photo" (`expo-camera`) or "From library" (`expo-image-picker` with `allowsMultipleSelection: true`).
+2. Action sheet: "Take photo" (`AVFoundation` camera) or "From library" (`PHPickerViewController` with multi-selection enabled).
 3. After permission, user picks up to 50 photos at once.
 4. Photos uploaded directly to Cloudinary using the unsigned upload preset, bypassing our backend. Upload runs in a background task so the user can keep browsing.
 5. Cloudinary runs Quality Analysis, Google Auto-Tagging, and Face Detection in a single request.
@@ -152,7 +153,7 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 - Supports JPEG, PNG, and HEIC. HEIC is uploaded as-is and Cloudinary auto-converts. 20 MB max per file.
 - Bulk upload of 20 photos completes within 90 seconds on a 4G connection.
 - Per-photo progress visible in a sticky upload tray at the bottom of the album view.
-- Failed uploads show an inline retry button; queue persists across app restarts via MMKV.
+- Failed uploads show an inline retry button; queue persists across app restarts via SwiftData.
 - Photo metadata (quality scores, tags, face boxes, person matches) queryable within 10 seconds of upload.
 - Uploads from non-verified contributors to public albums rejected with a verify prompt.
 - Camera permission denial shows an explainer with a deep link to system settings.
@@ -172,15 +173,15 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 1. User opens an album.
 2. Default view is grid sorted by composite score, descending. Three columns on phones, four on tablets.
 3. Sort toggle in the header: "Best", "Newest", "Oldest".
-4. Tapping a photo opens a fullscreen pager (`expo-image` with pinch zoom and swipe between photos).
+4. Tapping a photo opens a fullscreen pager (SwiftUI `TabView(.page)` with `MagnifyGesture` for pinch zoom and swipe between photos).
 5. **In fullscreen, detected faces show subtle outlines.** Tapping an outline shows the person's name (if tagged) or a "Tag this person" prompt.
-6. Long-pressing a photo shows a debug overlay with the score breakdown — fun demo touch.
+6. Long-pressing a photo shows a debug overlay (SwiftUI `.contextMenu` or custom overlay) with the score breakdown — fun demo touch.
 
 **Acceptance criteria:**
 
 - Composite score computed on photo metadata write; stored on the row (not recomputed at read).
 - Score is a float between 0 and 100, deterministic for the same inputs.
-- Album view loads first 20 ranked photos in under 1.5 seconds on 4G; uses `FlashList` (Shopify) for smooth scrolling.
+- Album view loads first 20 ranked photos in under 1.5 seconds on 4G; uses SwiftUI `LazyVGrid` for smooth scrolling.
 - Reranking on weight change is a single SQL update, not a re-fetch from Cloudinary.
 
 ### 5.5 People & Face Recognition (NEW)
@@ -195,7 +196,7 @@ The cleanest way to get tagged: tag yourself.
 
 1. Inside an album, user taps "Tag me in photos" on the people screen.
 2. Consent screen explains: "Your face data will be used to find you in this album only. It is deleted when the album is deleted or when you leave the album. It is not shared across other Bloom albums."
-3. User taps "I agree" and takes a selfie via `expo-camera` (or picks one from library).
+3. User taps "I agree" and takes a selfie via `AVFoundation` camera (or picks one from library).
 4. Selfie uploaded to Cloudinary, then sent to AWS Rekognition `IndexFaces` on the album's collection with `ExternalImageId = person:{user_id}`.
 5. Backend creates a `people` row: `(album_id, user_id, display_name = handle, is_self = true)`.
 6. Backend runs `SearchFacesByImage` against every existing photo in the album. Matches are written to `photo_faces` and shown in the user's "my photos" view.
@@ -275,9 +276,9 @@ Stated explicitly because face recognition is not optional to think carefully ab
 1. User taps "Make montage" button on album page.
 2. Bottom sheet shows chips grouped by theme type — people first, then tags, locations, group size.
 3. User taps a chip; spinner with playful loading copy.
-4. Result screen plays the slideshow video (`expo-video`) with "Save grid" and "Share" buttons.
-5. Share button uses native share sheet to send a public montage link (does not expose the underlying album).
-6. "Save to camera roll" via `expo-media-library`.
+4. Result screen plays the slideshow video (SwiftUI `VideoPlayer` / `AVPlayer`) with "Save grid" and "Share" buttons.
+5. Share button uses `UIActivityViewController` (native share sheet) to send a public montage link (does not expose the underlying album).
+6. "Save to camera roll" via `PHPhotoLibrary`.
 
 **Acceptance criteria:**
 
@@ -285,7 +286,7 @@ Stated explicitly because face recognition is not optional to think carefully ab
 - Themes with fewer than 4 matching photos are hidden.
 - Generated montages cached by `(album_id, theme_type, theme_value)` so repeat taps are instant.
 - Person-themed montages can only be generated by album members (consistent with the album-scoped privacy boundary). Recipients of the share link can view but cannot generate new ones.
-- Save-to-camera-roll requires media library permission; denial shows an explainer.
+- Save-to-camera-roll requires photo library add permission (`NSPhotoLibraryAddUsageDescription`); denial shows an explainer with a link to Settings.
 
 ### 5.7 Explore Page
 
@@ -294,7 +295,7 @@ Stated explicitly because face recognition is not optional to think carefully ab
 **User flow:**
 
 1. User taps "Explore" tab.
-2. `FlashList` of album cards: cover image (highest-scored photo), title, contributor count, photo count, creator handle.
+2. `LazyVGrid` / `List` of album cards: cover image (highest-scored photo), title, contributor count, photo count, creator handle.
 3. Tapping a card opens the album in read-only mode.
 4. "Join album" promotes the user to contributor.
 5. Pull-to-refresh re-fetches the feed.
@@ -337,7 +338,7 @@ Single unsigned upload preset configured with: Quality Analysis on, Google Auto-
 
 ### 7.2 Direct upload from device
 
-React Native uploads use `POST https://api.cloudinary.com/v1_1/{cloud}/image/upload` with `multipart/form-data`. The unsigned preset name is in the body, plus a `context` field carrying `album_id` and `uploader_id` so the webhook can route the result without a separate lookup. Files over 5 MB use the chunked upload protocol.
+Swift uploads use `URLSession` to `POST https://api.cloudinary.com/v1_1/{cloud}/image/upload` with `multipart/form-data`. The unsigned preset name is in the body, plus a `context` field carrying `album_id` and `uploader_id` so the webhook can route the result without a separate lookup. Files over 5 MB use the chunked upload protocol. Background uploads use `URLSession` background configuration so transfers survive app suspension.
 
 ### 7.3 Webhook
 
@@ -375,14 +376,14 @@ Album delete → `DeleteCollection`. User leaves album → `DeleteFaces` for all
 
 ---
 
-## 9. Mobile-Specific Concerns
+## 9. iOS-Specific Concerns
 
-- **Permissions:** Camera, photo library, and (optionally) location. Each has a pre-prompt explainer screen. **Face recognition consent is its own screen, separate from camera permission.** The OS camera permission is not consent for face recognition.
-- **Deep linking:** `Bloom://a/{code}` for in-app routing. `https://Bloom.app/a/{code}` as a universal link with App Site Association (iOS) and asset links (Android).
-- **Background uploads:** `expo-task-manager` so an upload doesn't die when the user backgrounds the app mid-trip.
-- **Offline:** Album views cached via TanStack Query persistence to MMKV. Uploads queued when offline.
+- **Permissions:** Camera (`NSCameraUsageDescription`), photo library (`NSPhotoLibraryUsageDescription`), and (optionally) location (`NSLocationWhenInUseUsageDescription`). Each has a pre-prompt explainer screen before the system dialog. **Face recognition consent is its own screen, separate from camera permission.** The OS camera permission is not consent for face recognition.
+- **Deep linking:** `Bloom://a/{code}` for custom URL scheme routing. `https://Bloom.app/a/{code}` as a universal link with an Apple App Site Association file. Handle both in the SwiftUI `App` via `.onOpenURL`.
+- **Background uploads:** `URLSession` background configuration with `sessionSendsLaunchEvents` so uploads survive app suspension and even termination.
+- **Offline:** Album views cached via SwiftData. Uploads queued locally when offline and drained when connectivity returns (monitored via `NWPathMonitor`).
 - **HEIC handling:** Don't transcode on device. Upload raw HEIC; let Cloudinary deliver `f_auto` JPEG/WebP/AVIF.
-- **Image memory:** `expo-image` with explicit `width`/`height` and `cachePolicy: 'memory-disk'`. Never load originals in the gallery.
+- **Image memory:** Use Kingfisher or Nuke with explicit size-limited thumbnails and disk+memory caching. Never load originals in the gallery grid.
 
 ---
 
@@ -392,25 +393,25 @@ Roughly 36 hours of build time. Two builders. Suggested cuts in priority order i
 
 | Hour | Milestone | Cut if needed |
 |---|---|---|
-| 0–4 | Expo project init, Cloudinary account, AWS account with Rekognition enabled, World ID app registered, Supabase schema applied, backend deployed. EAS Build configured. | — |
-| 4–10 | World ID auth flow end-to-end (deep link handoff). User can sign in and pick a handle. | Mock auth if World App handoff stalls. Re-enable for final demo. |
-| 10–18 | Album create/join, native multi-select upload, direct-to-Cloudinary, webhook → `photos` row, basic gallery view with `FlashList`. | Drop background upload task. |
+| 0–4 | Xcode project init with SwiftUI, Cloudinary account, AWS account with Rekognition enabled, World ID app registered, Supabase schema applied, backend deployed. TestFlight configured. | — |
+| 4–10 | World ID auth flow end-to-end (universal link handoff). User can sign in and pick a handle. | Mock auth if World App handoff stalls. Re-enable for final demo. |
+| 10–18 | Album create/join, `PHPicker` multi-select upload, direct-to-Cloudinary via `URLSession`, webhook → `photos` row, basic gallery view with `LazyVGrid`. | Drop background upload task. |
 | 18–24 | Composite scoring, ranked album view, sort toggles, fullscreen pager with face outlines. | Skip duplicate penalty; use raw Cloudinary aggregate. |
 | 24–30 | **Face recognition: self-enrollment flow + auto-tag on upload via Rekognition. People view with filtered photo grid.** | Ship self-enrollment only; skip cluster-and-name for demo. |
-| 30–34 | Themed montages: person, tag, face count themes. `expo-video` playback. | Ship static collages only; defer slideshow videos. |
-| 34–36 | Explore page, polish, demo script. TestFlight build for iOS judges, APK for Android. Fallback screen recordings of every flow. | Hard-code 3 seed public albums on explore if user count is too low. |
+| 30–34 | Themed montages: person, tag, face count themes. `AVPlayer` / `VideoPlayer` playback. | Ship static collages only; defer slideshow videos. |
+| 34–36 | Explore page, polish, demo script. TestFlight build for judges. Fallback screen recordings of every flow. | Hard-code 3 seed public albums on explore if user count is too low. |
 
 ---
 
 ## 11. Open Questions & Risks
 
-- **World ID handoff on simulators:** Real device required (iOS Simulator and Android Emulator can't run World App). Mitigation: build for real devices from hour 1, distribute via Expo Go for in-team testing and TestFlight/APK for judges.
+- **World ID handoff on simulators:** Real device required (iOS Simulator can't run World App). Mitigation: build for real devices from hour 1, use Xcode wireless debugging, distribute via TestFlight for judges.
 - **Cloudinary credit burn:** AI add-ons consume credits per call. Mitigation: rate-limit uploads to 50/user/day during the demo window.
 - **Rekognition cost surprises:** Indexing and searching adds up if a contributor uploads 500 photos. Mitigation: per-album rate limit (8.4) and an env-based kill switch.
 - **Face recognition consent:** The single biggest risk to a clean demo is a judge asking "what about people in the photos who didn't consent?" Mitigation: be loud and explicit about the album-scoped boundary, lead with self-enrollment, and ensure cluster-and-name only happens when an album member acts.
 - **Match accuracy on diverse faces:** Rekognition has known accuracy gaps across demographics. Mitigation: surface confidence scores in the UI, require manual confirmation for matches under 90, and allow easy "this isn't me" correction.
-- **Expo native module gaps:** If something requires a custom native module, we'd need to eject mid-hackathon. Mitigation: stay strictly within Expo SDK modules.
-- **App store submission:** Real submission takes days; out of scope. Distribute via TestFlight (iOS) and direct APK (Android).
+- **iOS-only limitation:** No Android version for judges who don't have an iPhone. Mitigation: have screen recordings of every flow as backup, and ensure at least one demo device is available.
+- **App store submission:** Real submission takes days; out of scope. Distribute via TestFlight.
 - **Latency on montage generation:** Cloudinary slideshow video can take 10–30 seconds for 12 photos. Plan: optimistic UI showing the static collage first, then swap in the video.
 
 ---
@@ -418,10 +419,11 @@ Roughly 36 hours of build time. Two builders. Suggested cuts in priority order i
 ## 12. Out of Scope (Post-Hackathon)
 
 - Web or PWA version.
+- Android version. Can revisit post-hackathon with Kotlin/Jetpack Compose or a cross-platform approach.
 - **Cross-album face recognition.** Hard architectural boundary; not just deferred.
 - Comments, reactions, or any social-graph features.
 - Album monetization, paid tiers, or watermark removal.
 - Web3 / on-chain features beyond World ID. Tempting given the World Chain ecosystem, but out of scope.
 - Custom user-trained quality models. We use Cloudinary's defaults.
-- Real App Store / Play Store submission and review.
-- On-device face recognition (face-api.js / TF.js) as an alternative to Rekognition.
+- Real App Store submission and review.
+- On-device face recognition (Vision framework) as an alternative to Rekognition.
