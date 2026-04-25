@@ -59,7 +59,7 @@ Three primary personas, all on mobile during or right after a shared experience.
 | **Navigation** | Expo Router (file-based routing). Bottom tab nav for Home / Explore / Profile, stack nav inside each tab. |
 | **State / data** | TanStack Query for server state, Zustand for local UI state, MMKV for persistent client storage (session, draft uploads). |
 | **Camera & library** | `expo-image-picker` for multi-select from library, `expo-camera` for in-app capture, `expo-media-library` for HEIC/EXIF metadata. |
-| **Backend** | Python + FastAPI. Postgres via Supabase. Webhook handlers for Cloudinary and Rekognition callbacks. |
+| **Backend** | Javascript + Express. Postgres via Supabase. Webhook handlers for Cloudinary and Rekognition callbacks. |
 | **Auth** | World ID 4.0. Mobile flow uses universal/app links to hand off to the World App, which returns the proof to our app. Server verifies via `developer.world.org/api/v4/verify/{rp_id}`. Session = JWT in MMKV. |
 | **Media storage & quality AI** | Cloudinary — direct uploads from the device using the unsigned upload preset, with Quality Analysis, Google Auto-Tagging, and Face Detection enabled. Cloudinary URLs for delivery and transformations. |
 | **Face recognition** | **AWS Rekognition.** One face collection per album. `IndexFaces` on enrollment, `SearchFacesByImage` on each new upload. Faces tagged via cluster-and-name flow. |
