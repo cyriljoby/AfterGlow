@@ -1,4 +1,4 @@
-# FrameJam — Product Requirements Document
+# Bloom — Product Requirements Document
 
 > A human-verified shared photo album with AI-ranked photos, person-tagged montages, and themed reels.
 
@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-**Product name:** FrameJam (working title).
+**Product name:** Bloom (working title).
 
 **One-liner:** Group photo albums where Cloudinary auto-ranks photos by quality, AWS Rekognition tags people, and the app stitches the best shots into themed montages — with World ID ensuring every account is a real human.
 
@@ -59,7 +59,7 @@ Three primary personas, all on mobile during or right after a shared experience.
 | **Navigation** | Expo Router (file-based routing). Bottom tab nav for Home / Explore / Profile, stack nav inside each tab. |
 | **State / data** | TanStack Query for server state, Zustand for local UI state, MMKV for persistent client storage (session, draft uploads). |
 | **Camera & library** | `expo-image-picker` for multi-select from library, `expo-camera` for in-app capture, `expo-media-library` for HEIC/EXIF metadata. |
-| **Backend** | Node + Fastify on Render or Railway. Postgres via Supabase. Webhook handlers for Cloudinary and Rekognition callbacks. |
+| **Backend** | Python + FastAPI. Postgres via Supabase. Webhook handlers for Cloudinary and Rekognition callbacks. |
 | **Auth** | World ID 4.0. Mobile flow uses universal/app links to hand off to the World App, which returns the proof to our app. Server verifies via `developer.world.org/api/v4/verify/{rp_id}`. Session = JWT in MMKV. |
 | **Media storage & quality AI** | Cloudinary — direct uploads from the device using the unsigned upload preset, with Quality Analysis, Google Auto-Tagging, and Face Detection enabled. Cloudinary URLs for delivery and transformations. |
 | **Face recognition** | **AWS Rekognition.** One face collection per album. `IndexFaces` on enrollment, `SearchFacesByImage` on each new upload. Faces tagged via cluster-and-name flow. |
@@ -118,8 +118,8 @@ Cloudinary tells us *that* faces exist; Rekognition tells us *who they are*. Rek
 
 1. User taps `+` on Home tab → "New album", enters a name and optional description.
 2. User picks visibility: Private (link-only) or Public (appears on explore).
-3. Album created with a 6-character join code, a deep link `framejam://a/ABC123`, and a universal link `https://framejam.app/a/ABC123` for sharing.
-4. Backend creates a per-album Rekognition face collection (`framejam_album_{album_id}`) at the same time. This collection is deleted if the album is deleted.
+3. Album created with a 6-character join code, a deep link `Bloom://a/ABC123`, and a universal link `https://Bloom.app/a/ABC123` for sharing.
+4. Backend creates a per-album Rekognition face collection (`Bloom_album_{album_id}`) at the same time. This collection is deleted if the album is deleted.
 5. Owner shares the link via the native share sheet.
 6. Recipient taps the link → app opens to a "Join album?" screen → confirms → becomes a contributor.
 
@@ -194,7 +194,7 @@ The cleanest way to get tagged: tag yourself.
 **User flow:**
 
 1. Inside an album, user taps "Tag me in photos" on the people screen.
-2. Consent screen explains: "Your face data will be used to find you in this album only. It is deleted when the album is deleted or when you leave the album. It is not shared across other FrameJam albums."
+2. Consent screen explains: "Your face data will be used to find you in this album only. It is deleted when the album is deleted or when you leave the album. It is not shared across other Bloom albums."
 3. User taps "I agree" and takes a selfie via `expo-camera` (or picks one from library).
 4. Selfie uploaded to Cloudinary, then sent to AWS Rekognition `IndexFaces` on the album's collection with `ExternalImageId = person:{user_id}`.
 5. Backend creates a `people` row: `(album_id, user_id, display_name = handle, is_self = true)`.
@@ -226,7 +226,7 @@ For people who attended but did not install the app — the bride's grandma, the
 - Naming a cluster requires the actor to be a confirmed album member.
 - A person row created from a cluster includes a `named_by` field for accountability.
 - A person can be renamed by any member, but the most recent rename wins. Edit history is stored on the row for the demo (could become a moderation tool later).
-- Naming a cluster does not notify the named person — they are not necessarily a FrameJam user. The cluster lives only in the album.
+- Naming a cluster does not notify the named person — they are not necessarily a Bloom user. The cluster lives only in the album.
 
 #### 5.5.3 People view
 
@@ -353,7 +353,7 @@ Static collage uses Cloudinary's `l_` (overlay) chained transformations to compo
 
 ### 8.1 Collections
 
-One face collection per album, named `framejam_album_{album_id}`. Created on album create, deleted on album delete. AWS limits collections to 20 million faces, far above hackathon scale.
+One face collection per album, named `Bloom_album_{album_id}`. Created on album create, deleted on album delete. AWS limits collections to 20 million faces, far above hackathon scale.
 
 ### 8.2 IndexFaces
 
@@ -371,14 +371,14 @@ Wrap all Rekognition calls in a per-album rate limiter (max 200 face operations 
 
 ### 8.5 Deletion
 
-Album delete → `DeleteCollection`. User leaves album → `DeleteFaces` for all faces with that user's `ExternalImageId`. User deletes their FrameJam account → cascade across every album they were enrolled in.
+Album delete → `DeleteCollection`. User leaves album → `DeleteFaces` for all faces with that user's `ExternalImageId`. User deletes their Bloom account → cascade across every album they were enrolled in.
 
 ---
 
 ## 9. Mobile-Specific Concerns
 
 - **Permissions:** Camera, photo library, and (optionally) location. Each has a pre-prompt explainer screen. **Face recognition consent is its own screen, separate from camera permission.** The OS camera permission is not consent for face recognition.
-- **Deep linking:** `framejam://a/{code}` for in-app routing. `https://framejam.app/a/{code}` as a universal link with App Site Association (iOS) and asset links (Android).
+- **Deep linking:** `Bloom://a/{code}` for in-app routing. `https://Bloom.app/a/{code}` as a universal link with App Site Association (iOS) and asset links (Android).
 - **Background uploads:** `expo-task-manager` so an upload doesn't die when the user backgrounds the app mid-trip.
 - **Offline:** Album views cached via TanStack Query persistence to MMKV. Uploads queued when offline.
 - **HEIC handling:** Don't transcode on device. Upload raw HEIC; let Cloudinary deliver `f_auto` JPEG/WebP/AVIF.
