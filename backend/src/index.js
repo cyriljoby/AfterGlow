@@ -20,6 +20,6 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 
-app.listen(env.port, () => {
-  console.log(`Bloom backend listening on port ${env.port}`);
+app.listen(env.port, "0.0.0.0", () => {
+  console.log(`Bloom backend listening on 0.0.0.0:${env.port}`);
 });

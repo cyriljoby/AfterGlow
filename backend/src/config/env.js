@@ -1,13 +1,10 @@
 require("dotenv").config();
 
-const required = [
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_KEY",
-  "WORLD_RP_ID",
-  "WORLD_RP_SIGNING_KEY",
-  "WORLD_ACTION",
-  "JWT_SECRET",
-];
+const isDev = process.env.NODE_ENV === "development";
+
+const required = isDev
+  ? ["JWT_SECRET"]
+  : ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "WORLD_RP_ID", "WORLD_RP_SIGNING_KEY", "WORLD_ACTION", "JWT_SECRET"];
 
 for (const key of required) {
   if (!process.env[key]) {
@@ -25,5 +22,3 @@ module.exports = {
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
 };
-
-EXPO_PUBLIC_API_URL = http://10.30.48.190:3001;

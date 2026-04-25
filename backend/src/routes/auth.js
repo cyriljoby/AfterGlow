@@ -1,16 +1,21 @@
 const { Router } = require("express");
 const jwt = require("jsonwebtoken");
 const env = require("../config/env");
-const supabase = require("../config/supabase");
-const { createSignedNonce, verifyWorldIdProof } = require("../lib/worldid");
 const requireAuth = require("../middleware/auth");
 
+const isDev = process.env.NODE_ENV === "development";
+const supabase = isDev ? null : require("../config/supabase");
+const worldid = isDev ? null : require("../lib/worldid");
+
 const router = Router();
+
+// In-memory dev user store (resets on restart)
+const devUsers = new Map();
 
 // GET /auth/nonce — returns signed request for World App handoff
 router.get("/nonce", async (_req, res, next) => {
   try {
-    const payload = await createSignedNonce();
+    const payload = await worldid.createSignedNonce();
     res.json(payload);
   } catch (err) {
     next(err);
@@ -20,17 +25,30 @@ router.get("/nonce", async (_req, res, next) => {
 // POST /auth/verify — verify World ID proof, upsert user, return JWT
 router.post("/verify", async (req, res, next) => {
   try {
-    let nullifierHash;
-
-    // Dev-only shortcut: skip World ID verification
-    if (req.body.dev === true && process.env.NODE_ENV === "development") {
-      nullifierHash = "dev_nullifier_" + (req.body.seed || "default");
-    } else {
-      const result = await verifyWorldIdProof(req.body);
-      nullifierHash = result.nullifier;
+    // --- Dev-only shortcut: mock user, no Supabase needed ---
+    if (req.body.dev === true && isDev) {
+      const id = "dev-user-001";
+      if (!devUsers.has(id)) {
+        devUsers.set(id, {
+          id,
+          nullifier_hash: "dev_nullifier_default",
+          handle: null,
+          created_at: new Date().toISOString(),
+        });
+      }
+      const user = devUsers.get(id);
+      const token = jwt.sign(
+        { sub: user.id, nullifier_hash: user.nullifier_hash },
+        env.jwtSecret,
+        { expiresIn: env.jwtExpiresIn }
+      );
+      return res.json({ token, user });
     }
 
-    // Try to find existing user
+    // --- Production flow ---
+    const result = await worldid.verifyWorldIdProof(req.body);
+    const nullifierHash = result.nullifier;
+
     let { data: user } = await supabase
       .from("users")
       .select("*")
@@ -38,7 +56,6 @@ router.post("/verify", async (req, res, next) => {
       .single();
 
     if (!user) {
-      // Create new user
       const { data: newUser, error } = await supabase
         .from("users")
         .insert({ nullifier_hash: nullifierHash })
@@ -46,7 +63,6 @@ router.post("/verify", async (req, res, next) => {
         .single();
 
       if (error) {
-        // Handle race condition: another request inserted the same nullifier
         if (error.code === "23505") {
           const { data: existing } = await supabase
             .from("users")
@@ -77,6 +93,10 @@ router.post("/verify", async (req, res, next) => {
 // GET /auth/me — return current user profile
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
+    if (isDev && devUsers.has(req.user.sub)) {
+      return res.json(devUsers.get(req.user.sub));
+    }
+
     const { data: user, error } = await supabase
       .from("users")
       .select("*")
@@ -104,6 +124,12 @@ router.patch("/handle", requireAuth, async (req, res, next) => {
       return res.status(400).json({
         error: "Handle must be 3-20 characters, lowercase alphanumeric or underscore",
       });
+    }
+
+    if (isDev && devUsers.has(req.user.sub)) {
+      const user = devUsers.get(req.user.sub);
+      user.handle = handle;
+      return res.json(user);
     }
 
     const { data: user, error } = await supabase
