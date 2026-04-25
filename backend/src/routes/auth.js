@@ -20,8 +20,15 @@ router.get("/nonce", async (_req, res, next) => {
 // POST /auth/verify — verify World ID proof, upsert user, return JWT
 router.post("/verify", async (req, res, next) => {
   try {
-    const result = await verifyWorldIdProof(req.body);
-    const nullifierHash = result.nullifier;
+    let nullifierHash;
+
+    // Dev-only shortcut: skip World ID verification
+    if (req.body.dev === true && process.env.NODE_ENV === "development") {
+      nullifierHash = "dev_nullifier_" + (req.body.seed || "default");
+    } else {
+      const result = await verifyWorldIdProof(req.body);
+      nullifierHash = result.nullifier;
+    }
 
     // Try to find existing user
     let { data: user } = await supabase
